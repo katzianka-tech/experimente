@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Singularität</title>
+<style>
+/* Layout: one full-bleed canvas, a quiet start prompt and a quiet end card. Deliberately single dark theme (cinema). */
+:root{
+  --void:#030308;
+  --ink:#e9e6f5;
+  --dim:#8d88a6;
+  --spark:#b9a8ff;
+  --font-ui:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;background:var(--void);color:var(--ink);overflow:hidden}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;background:var(--void);touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:grab}
+canvas:active{cursor:grabbing}
+.overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:14px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-bottom:calc(9vh + env(safe-area-inset-bottom,0px));font-family:var(--font-ui);text-align:center;pointer-events:none}
+.overlay button{pointer-events:auto}
+#start{cursor:pointer;background:none;border:0;color:var(--dim);font:500 12px/1.4 var(--font-ui);
+  letter-spacing:.32em;text-transform:uppercase;padding:14px 18px;animation:breathe 2.4s ease-in-out infinite}
+#start:focus-visible,#again:focus-visible{outline:1px solid var(--spark);outline-offset:4px}
+.hint{color:var(--dim);font-size:11px;letter-spacing:.12em;opacity:.7}
+@keyframes breathe{50%{opacity:.35}}
+#end{opacity:0;transition:opacity 1.2s ease}
+#end.on{opacity:1}
+#stats{font-size:11px;letter-spacing:.14em;color:var(--dim);display:flex;flex-wrap:wrap;justify-content:center;gap:6px 18px;
+  font-variant-numeric:tabular-nums;text-transform:uppercase}
+#stats b{color:var(--ink);font-weight:600}
+#again{background:none;border:1px solid #ffffff22;color:var(--ink);font:500 11px/1 var(--font-ui);letter-spacing:.28em;
+  text-transform:uppercase;padding:12px 18px;border-radius:999px;cursor:pointer}
+#again:hover{border-color:var(--spark)}
+#err{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;font:13px/1.6 var(--font-ui);color:var(--dim);text-align:center}
+@media (prefers-reduced-motion:reduce){#start{animation:none}}
+</style>
+</head>
+<body>
+
+<canvas id="c" aria-label="Echtzeit-Animation"></canvas>
+<div class="overlay" id="intro">
+  <button id="start" type="button">Tippen zum Starten</button>
+  <div class="hint">Bild mit dem Finger ziehen, quetschen, dehnen</div>
+  <div class="hint">mit Ton · 10 Sekunden · intensive Licht- und Bewegungseffekte</div>
+</div>
+<div class="overlay" id="end" hidden>
+  <div id="stats"></div>
+  <button id="again" type="button">Nochmal</button>
+</div>
+<div id="err" hidden></div>
+
+<script>
+(()=>{
+const DUR=10;
+const MOBILE=/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&innerWidth<1100);
+const cv=document.getElementById('c');
+const gl=cv.getContext('webgl',{antialias:false,alpha:false,depth:false,powerPreference:'high-performance'});
+const errBox=document.getElementById('err');
+if(!gl){errBox.hidden=false;errBox.textContent='Dieser Browser kann kein WebGL. Bitte mit einem aktuellen Chrome, Safari oder Firefox öffnen.';return;}
+
+/* ---------- Text texture (drawn at runtime: R = sharp glyphs, G = glow) ---------- */
+const WORD='SINGULARITÄT';
+const tc=document.createElement('canvas');tc.width=2048;tc.height=512;
+(function drawText(){
+  const tx=tc.getContext('2d');
+  const fam='"Helvetica Neue",Arial,system-ui,sans-serif',track=.18;
+  let size=300;
+  const setF=ctx=>{ctx.font=`200 ${size}px ${fam}`;ctx.textAlign='center';ctx.textBaseline='middle';};
+  setF(tx);
+  const measure=()=>{let w=0;for(const ch of WORD)w+=tx.measureText(ch).width+size*track;return w-size*track;};
+  while(measure()>1840&&size>40){size-=6;setF(tx);}
+  const total=measure();
+  const paint=(ctx,blur,color)=>{setF(ctx);ctx.filter=blur?`blur(${blur}px)`:'none';ctx.fillStyle=color;let x=1024-total/2;
+    for(const ch of WORD){const w=ctx.measureText(ch).width;ctx.fillText(ch,x+w/2,262);x+=w+size*track;}ctx.filter='none';};
+  const a=document.createElement('canvas');a.width=2048;a.height=512;paint(a.getContext('2d'),0,'#f00');
+  const b=document.createElement('canvas');b.width=2048;b.height=512;const bc=b.getContext('2d');paint(bc,28,'#0f0');paint(bc,10,'#0f0');
+  const c3=document.createElement('canvas');c3.width=2048;c3.height=512;const k3=c3.getContext('2d');
+  k3.font=`200 300px ${fam}`;k3.textAlign='center';k3.textBaseline='middle';k3.fillStyle='#00f';
+  {const w=['I','C','H'].map(ch=>k3.measureText(ch).width),gap=300*.22,tot=w.reduce((x,y)=>x+y)+gap*2;let x=1024-tot/2;
+   ['I','C','H'].forEach((ch,i)=>{k3.fillText(ch,x+w[i]/2,262);x+=w[i]+gap;});}
+  tx.fillStyle='#000';tx.fillRect(0,0,2048,512);
+  tx.globalCompositeOperation='lighter';tx.drawImage(a,0,0);tx.drawImage(b,0,0);tx.drawImage(c3,0,0);tx.globalCompositeOperation='source-over';
+})();
+
+/* ---------- Shaders ---------- */
+const VS=`attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
+const FS_SCENE=`
+precision highp float;
+uniform vec2 uRes;uniform float uT;uniform sampler2D uTex;
+uniform vec3 uRo,uFwd,uLp;
+uniform float uRoll,uFoc,uLight,uH,uTw,uM,uOut,uFlash,uTxt,uWave,uCore,uTextW,uX,uKal,uIch,uIchG,uIchD;
+#define MAXS ${MOBILE?72:100}
+#define REFL ${MOBILE?28:44}
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float hash3(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
+vec3 pal(float t){return .5+.5*cos(6.2831*(vec3(.95,1.,1.05)*t+vec3(.0,.33,.67)));}
+
+/* an endless Menger sponge carved out of solid space. The flight axis x=y=0 is a corridor at every scale,
+   so the camera can travel through it forever. The space twists around that axis. */
+float lev;
+float map(vec3 p){
+  float a=p.z*uTw+uT*.12+uX*.9*sin(p.z*.6+uT*1.3);float c=cos(a),s=sin(a);p.xy=mat2(c,-s,s,c)*p.xy;
+  float rr=length(p.xy);p.xy*=1.+uX*.22*sin(rr*2.5-uT*2.2+p.z*.8);
+  float h=uH+.1*uX*sin(uT*2.1+p.z*.7);
+  float d=-1e5,sc=1.;lev=0.;
+  for(int i=0;i<4;i++){
+    vec3 q=mod(p*sc,2.)-1.;
+    sc*=3.;
+    vec3 r=abs(1.-3.*abs(q));
+    float cc=(min(max(r.x,r.y),min(max(r.y,r.z),max(r.z,r.x)))-h)/sc;
+    if(cc>d){d=cc;lev=float(i);}
+  }
+  if(uM>0.)d+=uM*.022*sin(p.x*5.+uT*2.)*sin(p.y*5.+uT*1.7)*sin(p.z*4.-uT*2.6);
+  return d;
+}
+vec3 nrm(vec3 p,float e){vec2 k=vec2(1,-1);
+  return normalize(k.xyy*map(p+k.xyy*e)+k.yyx*map(p+k.yyx*e)+k.yxy*map(p+k.yxy*e)+k.xxx*map(p+k.xxx*e));}
+
+vec3 env(vec3 rd){
+  float a=atan(rd.x,rd.y),y=rd.z;
+  vec3 c=vec3(.004,.004,.012);
+  c+=vec3(.25,.18,.6)*pow(max(0.,sin(y*14.+uT*.6)*.5+.5),40.)*.35;
+  float band=exp(-abs(rd.y-.15*sin(rd.x*4.+uT*.3))*7.);
+  c+=mix(vec3(.15,.05,.4),vec3(.0,.35,.5),.5+.5*sin(a*3.+uT*.4))*band*.55;
+  c+=step(.9975,hash3(floor(rd*180.)))*.9;
+  return c;
+}
+vec3 shade(vec3 p,vec3 n,vec3 rd,float lv){
+  vec3 L=uLp-p;float ld=length(L);L/=ld;
+  float att=uLight/(1.+ld*ld*.55);
+  vec3 irid=pal(lv*.23+p.z*.04+uT*(.05+.22*uX)+.55);
+  vec3 base=mix(vec3(.035,.03,.05),irid*irid,.45);
+  float dif=max(dot(n,L),0.);
+  float spe=pow(max(dot(reflect(rd,n),L),0.),36.);
+  float fr=pow(1.-max(dot(n,-rd),0.),4.);
+  vec3 c=base*(dif*att*vec3(1.,.93,.86)+.015)+spe*att*.7*mix(vec3(1.),irid,.5);
+  c+=irid*fr*att*.35;
+  return c;
+}
+vec3 aces(vec3 x){return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.,1.);}
+
+void main(){
+  vec2 fc=gl_FragCoord.xy;
+  vec2 uv0=(fc-.5*uRes)/uRes.y;
+  float rl=length(uv0);
+  float cr=cos(uRoll),sr=sin(uRoll);vec2 uv=mat2(cr,-sr,sr,cr)*uv0;
+  if(uKal>0.){float ka=atan(uv.y,uv.x),kr=length(uv),seg=6.2831853/6.;ka=abs(mod(ka,seg)-seg*.5);
+    uv=mix(uv,kr*vec2(cos(ka),sin(ka)),uKal);}
+  float wave=uWave>0.?exp(-pow((rl-uWave)*9.,2.))*.06*(1.-smoothstep(0.,1.6,uWave)):0.;
+  uv*=1.-wave/max(rl,.001);
+  vec3 ww=uFwd,uu=normalize(cross(ww,vec3(0,1,0))),vv=cross(uu,ww);
+  vec3 rd=normalize(uv.x*uu+uv.y*vv+uFoc*ww);
+  vec3 ro=uRo;
+  vec3 col=vec3(0.);
+
+  if(uOut<.5){
+    float t=.02,glow=0.,st=0.;bool hit=false;
+    for(int i=0;i<MAXS;i++){
+      float d=map(ro+rd*t);
+      glow+=exp(-d*30.);
+      if(d<.0005*t+.0002){hit=true;st=float(i);break;}
+      t+=d*mix(.7,.5,uX);st=float(i);
+      if(t>18.)break;
+    }
+    vec3 fogc=vec3(.02,.018,.06)*uLight;
+    if(hit){
+      vec3 p=ro+rd*t;float lv=lev;
+      vec3 n=nrm(p,.0006*t+.0002);
+      float ao=1.-st/float(MAXS);ao*=ao;
+      vec3 c=shade(p,n,rd,lv)*ao;
+      if(uM>0.001){
+        // liquid walls: they mirror the corridors around you
+        vec3 rr=reflect(rd,n);float s=.01;bool h2=false;
+        for(int i=0;i<REFL;i++){float d=map(p+n*.003+rr*s);if(d<.001*s+.0003){h2=true;break;}s+=d*.8;if(s>8.)break;}
+        vec3 rc=fogc;
+        if(h2){vec3 q=p+rr*s;vec3 n2=nrm(q,.002);rc=shade(q,n2,rr,lev);rc=mix(rc,fogc,1.-exp(-(t+s)*.2));}
+        float fr=pow(1.-max(dot(n,-rd),0.),3.);
+        vec3 liquid=rc*(.45+.55*fr)+pal(fr*1.3+p.z*.05+uT*.15)*fr*.35*uLight*.4;
+        liquid+=pow(max(dot(rr,normalize(uLp-p)),0.),90.)*uLight*1.5;
+        c=mix(c,liquid,uM);
+      }
+      col=mix(c,fogc,1.-exp(-t*.2));
+    }else col=fogc;
+    col+=vec3(.5,.42,1.)*glow*.0025*uLight;
+  }else{
+    col=env(rd);
+  }
+
+  // the singularity: the light you fly toward, always straight ahead
+  col+=vec3(.85,.8,1.)*uCore*(.0022/(dot(uv0,uv0)+.00035)+.05*exp(-rl*5.));
+
+  if(uIch>0.){
+    vec2 q=uv0/(vec2(1.25,.3125)*(1.+uIchG))+.5;
+    float ca=.002+uIchG*.012;
+    vec3 tx=vec3(texture2D(uTex,q+vec2(ca,0.)).b,texture2D(uTex,q).b,texture2D(uTex,q-vec2(ca,0.)).b);
+    float inside=step(0.,q.x)*step(q.x,1.)*step(0.,q.y)*step(q.y,1.);
+    float keep=step(uIchD,hash(floor(fc/3.)));
+    col+=tx*inside*keep*uIch*1.3;
+  }
+  if(uWave>0.){
+    float fade=1.-smoothstep(.2,1.8,uWave);
+    col+=vec3(.6,.55,1.)*exp(-pow((rl-uWave)*22.,2.))*fade*1.1;
+    col+=vec3(1.,.6,.9)*exp(-pow((rl-uWave*.82)*30.,2.))*fade*.5;
+  }
+
+  if(uTxt>0.){
+    vec2 q=uv0/vec2(uTextW,uTextW*.25)+.5;
+    float k=clamp(uTxt,0.,1.);
+    float rad=k*k*1.35;
+    float e=1.-smoothstep(rad,rad-.35,rl);e*=e;
+    vec2 cell=floor(fc/2.);
+    vec2 jitter=(vec2(hash(cell),hash(cell+7.3))-.5)*e*.5;
+    vec2 tq=q+jitter-uv0*e*.8/vec2(uTextW,uTextW*.25);
+    float ca=.003+e*.04;
+    vec3 tex=vec3(texture2D(uTex,tq+vec2(ca,0.)).r,texture2D(uTex,tq).r,texture2D(uTex,tq-vec2(ca,0.)).r);
+    float g=texture2D(uTex,q).g;
+    float inside=step(0.,tq.x)*step(tq.x,1.)*step(0.,tq.y)*step(tq.y,1.);
+    float sparkle=step(e*.9,hash(cell+floor(uT*30.)));
+    col+=tex*inside*sparkle*1.6+tex*inside*exp(-pow((rl-rad)*9.,2.))*vec3(.9,.8,1.)*1.6;
+    col+=vec3(.45,.35,1.)*g*.35*smoothstep(.3,1.,k);
+  }
+
+  col+=vec3(1.,.95,1.)*uFlash;
+  col=aces(col*1.15);
+  vec2 v=fc/uRes;col*=.35+.65*pow(16.*v.x*v.y*(1.-v.x)*(1.-v.y),.22);
+  gl_FragColor=vec4(pow(col,vec3(.4545)),1.);
+}`;
+/* blends the new frame with the last one: camera-like motion blur and smoother edges */
+const FS_ACC=`precision mediump float;uniform sampler2D uS,uH;uniform vec2 uRes;uniform float uK,uTr,uZ,uA,uHue;
+vec3 hue(vec3 c,float a){mat3 toY=mat3(.299,.596,.211,.587,-.274,-.523,.114,-.322,.312);
+  mat3 toR=mat3(1.,1.,1.,.956,-.272,-1.106,.621,-.647,1.703);vec3 y=toY*c;float cs=cos(a),sn=sin(a);
+  y.yz=mat2(cs,sn,-sn,cs)*y.yz;return clamp(toR*y,0.,1.);}
+void main(){vec2 uv=gl_FragCoord.xy/uRes;vec3 s=texture2D(uS,uv).rgb;
+  vec2 asp=vec2(uRes.x/uRes.y,1.);vec2 d=(uv-.5)*asp;float c=cos(uA),sn=sin(uA);
+  d=mat2(c,-sn,sn,c)*d*uZ;
+  vec3 h=texture2D(uH,d/asp+.5).rgb;
+  vec3 o=mix(s,texture2D(uH,uv).rgb,uK);
+  vec3 hh=hue(h,uHue);float l=dot(hh,vec3(.299,.587,.114));hh=clamp(mix(vec3(l),hh,1.35)*(.92+.08*l),0.,1.);
+  if(uTr>0.)o=max(o,hh*uTr);   // video feedback: every frame flows outward, turning and changing colour
+  gl_FragColor=vec4(o,1.);}`;
+/* elastic touch: each finger drags the picture around it like rubber */
+const FS_OUT=`precision highp float;uniform sampler2D uH;uniform vec2 uRes;uniform float uT;uniform vec4 uB[4];uniform float uTe[4];
+void main(){vec2 fc=gl_FragCoord.xy;
+ vec2 asp=vec2(uRes.x/uRes.y,1.);vec2 p=(fc/uRes-.5)*asp;
+ vec2 disp=vec2(0.);float str=0.;
+ for(int i=0;i<4;i++){vec2 off=uB[i].zw;float L=length(off);
+   if(L<1e-5)continue;
+   vec2 c=uB[i].xy+off;float r=.2+.55*L;vec2 dd=p-c;
+   float w=exp(-dot(dd,dd)/(r*r));disp+=off*w;str+=w*L;
+   float te=uTe[i]*w;
+   if(te>.002){vec2 dir=off/L,nr=vec2(-dir.y,dir.x);
+     float band=floor(dot(p,nr)*38.);float rnd=fract(sin(band*91.7+floor(uT*24.))*4375.5)-.5;
+     disp+=dir*rnd*te*.14;str+=te*.9;}}
+ vec2 uv=(p-disp)/asp+.5;
+ float ca=min(str,.6)*.025;
+ vec3 c=vec3(texture2D(uH,uv+vec2(ca,0.)).r,texture2D(uH,uv).g,texture2D(uH,uv-vec2(ca,0.)).b);
+ c*=1.+min(str,.6)*.35;
+ float n=fract(sin(dot(vec3(fc,fract(uT)*97.),vec3(12.9898,78.233,37.719)))*43758.5453)-.5;
+ gl_FragColor=vec4(c+n*.022*(.4+c),1.);}`;
+
+function sh(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
+function program(fs,names){
+  const p=gl.createProgram();gl.attachShader(p,sh(gl.VERTEX_SHADER,VS));gl.attachShader(p,sh(gl.FRAGMENT_SHADER,fs));
+  gl.bindAttribLocation(p,0,'p');gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));
+  const u={};names.forEach(n=>u[n]=gl.getUniformLocation(p,n));return {p,u};
+}
+const SCENE_U=['uRes','uT','uTex','uRo','uFwd','uLp','uRoll','uFoc','uLight','uH','uTw','uM','uOut','uFlash','uTxt','uWave','uCore','uTextW','uX','uKal','uIch','uIchG','uIchD'];
+let S,ACC,OUT;
+try{S=program(FS_SCENE,SCENE_U);ACC=program(FS_ACC,['uS','uH','uRes','uK','uTr','uZ','uA','uHue']);OUT=program(FS_OUT,['uH','uRes','uT','uB','uTe']);}
+catch(e){errBox.hidden=false;errBox.textContent='Der Shader liess sich auf diesem Gerät nicht übersetzen.';console.error(e);return;}
+const buf=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+
+function texParams(){gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);}
+gl.activeTexture(gl.TEXTURE0);
+const textTex=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,textTex);
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,tc);texParams();
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+
+/* ---------- Render targets ---------- */
+let W=2,H=2,targets=[],cur=0;
+const blobs=[]; // one per finger: grab point g, offset o, velocity v
+function makeTarget(w,h){const t=gl.createTexture();gl.activeTexture(gl.TEXTURE3);gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);texParams();
+  const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
+  gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT);return {t,f};}
+let scale=1;
+const MAXSCALE=Math.min(window.devicePixelRatio||1,MOBILE?1.5:2);
+function applySize(){
+  const w=Math.max(2,Math.round(innerWidth*scale)),h=Math.max(2,Math.round(innerHeight*scale));
+  if(w===W&&h===H&&targets.length)return;
+  W=w;H=h;cv.width=w;cv.height=h;
+  targets.forEach(x=>{gl.deleteTexture(x.t);gl.deleteFramebuffer(x.f);});
+  targets=[makeTarget(w,h),makeTarget(w,h),makeTarget(w,h)]; // scene, history A, history B
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+}
+
+/* ---------- Timeline: every phase overlaps the next one ---------- */
+const ss=(a,b,x)=>{const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t);};
+const clamp01=x=>Math.min(1,Math.max(0,x));
+/* speed along the corridor, and its integral = distance travelled */
+function speed(t){return .22+1.15*ss(1.0,3.2,t)-.35*ss(4.9,6.2,t)+9*Math.pow(clamp01((t-6.7)/1.3),3);}
+function travelled(t){const n=240,h=t/n;let s=speed(0)+speed(t);for(let i=1;i<n;i++)s+=speed(i*h)*(i%2?4:2);return s*h/3;}
+function params(t){
+  const P={};
+  const z=-travelled(Math.min(t,7.98));
+  const kick=t>5?Math.exp(-(t-5)*6)*Math.sin((t-5)*60)*.012:0;   // the impact shakes you
+  P.uRo=[.025*Math.sin(t*.7)+kick,.02*Math.sin(t*.9+1),z];
+  const yaw=.06*Math.sin(t*.45)*(1-ss(6.8,7.8,t)),pitch=.04*Math.sin(t*.6+2)*(1-ss(6.8,7.8,t));
+  P.uFwd=[Math.sin(yaw),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch)];
+  P.uLp=[0,0,z-2.6];
+  P.uRoll=.35*Math.sin(t*.33)+.5*ss(2,7.5,t);
+  P.uFoc=1.45-.6*ss(6.9,7.95,t);                // the view widens as you are pulled in
+  P.uLight=.03+1.4*ss(.4,2.9,t)-.35*ss(5.5,6.5,t)+2.6*Math.pow(ss(7.2,7.97,t),2);
+  P.uH=1.32-.42*ss(1.5,5.2,t);                   // the corridors open up around you
+  P.uTw=.03+.09*ss(2.,6.5,t);
+  P.uM=ss(4.95,6.0,t);                           // walls turn liquid on the impact
+  P.uOut=t>=7.98?1:0;                            // through the singularity, into open space
+  P.uCore=1-.65*ss(.8,2.4,t)+5*Math.pow(ss(6.8,7.98,t),2)*(t<7.98?1:0)+(t>=7.98?1.2*(1-ss(8.2,9.8,t)*.85):0);
+  P.uFlash=t<7.98?ss(7.8,7.98,t)*1.2:Math.exp(-(t-7.98)*26)*1.2;
+  P.uWave=t>7.98?(t-7.98)*1.05:0;
+  P.uTxt=ss(8.0,9.5,t);
+  // dissolving: the self, the space, the up and down
+  P.uIch=ss(.15,.8,t)*(1-ss(2.2,2.8,t));
+  P.uIchG=Math.pow(ss(1.0,2.8,t),2)*5;
+  P.uIchD=ss(1.3,2.6,t);
+  P.uX=t<7.98?(.25*ss(1.8,3.5,t)+.45*ss(3.5,5.,t)+.3*ss(5.,5.6,t))*(1-.6*ss(7.4,7.95,t)):0;
+  P.uKal=t<7.98?(.35*ss(3.,5.,t)+.65*ss(5.,6.5,t))*(1-ss(7.45,7.95,t)):0;
+  P.uRoll+=.55*Math.pow(Math.max(0,t-4.5),1.4)*(t<7.98?1:0);
+  P.uCore*=t<2.4?.45+.55*ss(1.2,2.4,t):1;
+  return P;
+}
+
+function drawScene(t){
+  const P=params(t);
+  gl.useProgram(S.p);gl.bindFramebuffer(gl.FRAMEBUFFER,targets[0].f);gl.viewport(0,0,W,H);
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,textTex);gl.uniform1i(S.u.uTex,0);
+  gl.uniform2f(S.u.uRes,W,H);gl.uniform1f(S.u.uT,t);
+  gl.uniform3fv(S.u.uRo,P.uRo);gl.uniform3fv(S.u.uFwd,P.uFwd);gl.uniform3fv(S.u.uLp,P.uLp);
+  for(const k of['uRoll','uFoc','uLight','uH','uTw','uM','uOut','uFlash','uTxt','uWave','uCore','uX','uKal','uIch','uIchG','uIchD'])gl.uniform1f(S.u[k],P[k]);
+  gl.uniform1f(S.u.uTextW,Math.min(1.5,(W/H)*.92));
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+function feedback(t){
+  const tr=t<7.98?.52*ss(1.6,3.8,t)+.3*ss(4.8,5.6,t)-.25*ss(7.6,7.95,t):.5*(1-ss(8.3,9.3,t));
+  const z=.988-.02*ss(3.,5.5,t)+.01*ss(7.4,7.9,t);
+  const a=.003+.009*ss(3.5,6.,t);
+  const h=.012+.05*ss(4.,6.,t);
+  return {tr,z,a,h};
+}
+function present(t,k,dt){
+  dt=dt||16.7;const F=feedback(t),f=dt/16.7;
+  const src=targets[1+cur],dst=targets[2-cur];
+  gl.useProgram(ACC.p);gl.bindFramebuffer(gl.FRAMEBUFFER,dst.f);
+  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,targets[0].t);gl.uniform1i(ACC.u.uS,1);
+  gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,src.t);gl.uniform1i(ACC.u.uH,2);
+  gl.uniform2f(ACC.u.uRes,W,H);gl.uniform1f(ACC.u.uK,k);
+  gl.uniform1f(ACC.u.uTr,k>0?Math.pow(Math.max(F.tr,0),1/Math.max(f,.25))*(F.tr>0?1:0):0);
+  gl.uniform1f(ACC.u.uZ,Math.pow(F.z,f));gl.uniform1f(ACC.u.uA,F.a*f);gl.uniform1f(ACC.u.uHue,F.h*f);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  cur=1-cur;
+  outOnly(t);
+}
+/* draws the latest frame to the screen through the touch deformation */
+const blobData=new Float32Array(16),tearData=new Float32Array(4);
+function outOnly(t){
+  blobData.fill(0);tearData.fill(0);
+  blobs.slice(0,4).forEach((b,i)=>{blobData.set([b.gx,b.gy,b.ox,b.oy],i*4);tearData[i]=b.tear||0;});
+  gl.useProgram(OUT.p);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,W,H);
+  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,targets[1+cur].t);gl.uniform1i(OUT.u.uH,1);
+  gl.uniform2f(OUT.u.uRes,W,H);gl.uniform1f(OUT.u.uT,t);gl.uniform4fv(OUT.u.uB,blobData);gl.uniform1fv(OUT.u.uTe,tearData);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+function render(t,k,dt){drawScene(t);present(t,k,dt);}
+
+/* ---------- Pick the resolution once, before playback, so it never jumps ---------- */
+function benchmark(){
+  scale=Math.min(MAXSCALE,MOBILE?.6:.9);applySize();
+  const px=new Uint8Array(4);
+  const run=()=>{const t0=performance.now();for(const tt of[4.0,6.2,5.4]){drawScene(tt);}
+    gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,px);return (performance.now()-t0)/3;};
+  run(); // warm-up (driver compiles lazily)
+  const ms=Math.max(1,Math.min(run(),run()));
+  const target=MOBILE?13:11;   // leaves headroom for the browser and the audio thread
+  scale=Math.max(.28,Math.min(MAXSCALE,scale*Math.sqrt(target/ms)));
+  applySize();
+}
+
+/* ---------- Sound, synthesized live (unchanged) ---------- */
+let ac=null;
+function buildAudio(){
+  const A=new (window.AudioContext||window.webkitAudioContext)();
+  const master=A.createGain();master.gain.value=.9;
+  const comp=A.createDynamicsCompressor();comp.threshold.value=-14;comp.ratio.value=4;
+  master.connect(comp);comp.connect(A.destination);
+  const len=A.sampleRate*3.5,ir=A.createBuffer(2,len,A.sampleRate);
+  for(let ch=0;ch<2;ch++){const d=ir.getChannelData(ch);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.6);}
+  const verb=A.createConvolver();verb.buffer=ir;const vg=A.createGain();vg.gain.value=.55;verb.connect(vg);vg.connect(master);
+  const noiseBuf=A.createBuffer(1,A.sampleRate*2,A.sampleRate);{const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;}
+  return {A,master,verb,noiseBuf};
+}
+function schedule(Sx){
+  const {A,master,verb,noiseBuf}=Sx;const T=A.currentTime+.05;
+  const env=(g,pts)=>{g.gain.setValueAtTime(0,T);for(const[t,v]of pts)g.gain.linearRampToValueAtTime(v,T+t);};
+  const out=(node,dry=1,wet=0)=>{if(dry){const g=A.createGain();g.gain.value=dry;node.connect(g);g.connect(master);}
+    if(wet){const g=A.createGain();g.gain.value=wet;node.connect(g);g.connect(verb);}};
+  {const o=A.createOscillator(),g=A.createGain();o.type='sine';o.frequency.setValueAtTime(36,T);o.frequency.linearRampToValueAtTime(48,T+5);o.frequency.linearRampToValueAtTime(55,T+7.9);
+   o.connect(g);env(g,[[.2,.0],[2.5,.35],[7.6,.6],[7.95,.0]]);out(g,1,.1);o.start(T);o.stop(T+8.2);}
+  {const f=A.createBiquadFilter();f.type='lowpass';f.Q.value=6;f.frequency.setValueAtTime(120,T);f.frequency.exponentialRampToValueAtTime(400,T+2);
+   f.frequency.exponentialRampToValueAtTime(3200,T+4.9);f.frequency.exponentialRampToValueAtTime(900,T+6.5);f.frequency.exponentialRampToValueAtTime(5000,T+7.9);
+   const g=A.createGain();env(g,[[1.,0],[2.2,.08],[4.9,.16],[5.05,.06],[7.6,.14],[7.95,0]]);f.connect(g);out(g,1,.6);
+   [55,55*1.5,110*1.005,110*.997,164.8].forEach(fr=>{const o=A.createOscillator();o.type='sawtooth';o.frequency.value=fr;o.connect(f);o.start(T);o.stop(T+8.2);});}
+  {const n=A.createBufferSource();n.buffer=noiseBuf;n.loop=true;const f=A.createBiquadFilter();f.type='bandpass';f.Q.value=3;
+   f.frequency.setValueAtTime(300,T+2.6);f.frequency.exponentialRampToValueAtTime(6000,T+4.95);
+   const g=A.createGain();env(g,[[2.6,0],[4.9,.22],[5.1,0]]);n.connect(f);f.connect(g);out(g,.8,.5);n.start(T+2.6);n.stop(T+5.3);}
+  const impact=(at,big)=>{
+    const o=A.createOscillator(),g=A.createGain();o.type='sine';
+    o.frequency.setValueAtTime(big?140:110,T+at);o.frequency.exponentialRampToValueAtTime(big?32:40,T+at+(big?.9:.4));
+    g.gain.setValueAtTime(0,T+at-.001);g.gain.linearRampToValueAtTime(big?1:.7,T+at+.005);g.gain.exponentialRampToValueAtTime(.001,T+at+(big?2.4:.9));
+    o.connect(g);out(g,1,.2);o.start(T+at-.01);o.stop(T+at+2.6);
+    const n=A.createBufferSource();n.buffer=noiseBuf;const f=A.createBiquadFilter();f.type='highpass';f.frequency.value=big?1200:2500;
+    const ng=A.createGain();ng.gain.setValueAtTime(0,T+at-.001);ng.gain.linearRampToValueAtTime(big?.5:.25,T+at+.003);ng.gain.exponentialRampToValueAtTime(.001,T+at+(big?1.2:.35));
+    n.connect(f);f.connect(ng);out(ng,.7,.9);n.start(T+at);n.stop(T+at+1.4);
+  };
+  impact(5.0,false);
+  const notes=[0,3,7,10,12,15,19,22,24];
+  for(let i=0;i<14;i++){
+    const at=5.05+i*.16+Math.random()*.05;const st=notes[(i*5+2)%notes.length];const fr=440*Math.pow(2,(st-2)/12);
+    const car=A.createOscillator(),mod=A.createOscillator(),mg=A.createGain(),g=A.createGain();
+    car.frequency.value=fr;mod.frequency.value=fr*3.5;mg.gain.setValueAtTime(fr*2.2,T+at);mg.gain.exponentialRampToValueAtTime(fr*.05,T+at+1.2);
+    mod.connect(mg);mg.connect(car.frequency);car.connect(g);
+    g.gain.setValueAtTime(0,T+at);g.gain.linearRampToValueAtTime(.05,T+at+.004);g.gain.exponentialRampToValueAtTime(.0005,T+at+1.6);
+    out(g,.5,1);car.start(T+at);mod.start(T+at);car.stop(T+at+1.8);mod.stop(T+at+1.8);
+  }
+  {const n=A.createBufferSource();n.buffer=noiseBuf;n.loop=true;const f=A.createBiquadFilter();f.type='lowpass';f.Q.value=8;
+   f.frequency.setValueAtTime(400,T+7.0);f.frequency.exponentialRampToValueAtTime(9000,T+7.97);
+   const g=A.createGain();g.gain.setValueAtTime(0,T+7.0);g.gain.exponentialRampToValueAtTime(.4,T+7.96);g.gain.linearRampToValueAtTime(0,T+7.98);
+   n.connect(f);f.connect(g);out(g,1,.2);n.start(T+7.0);n.stop(T+8.1);
+   const o=A.createOscillator(),og=A.createGain();o.type='triangle';o.frequency.setValueAtTime(80,T+7.2);o.frequency.exponentialRampToValueAtTime(1600,T+7.97);
+   og.gain.setValueAtTime(0,T+7.2);og.gain.linearRampToValueAtTime(.12,T+7.95);og.gain.linearRampToValueAtTime(0,T+7.98);o.connect(og);out(og,1,.3);o.start(T+7.2);o.stop(T+8.05);}
+  impact(8.0,true);
+  [[110,.12],[164.8,.08],[220,.07],[277.2,.05],[329.6,.05],[440,.035],[659.3,.025],[880,.02]].forEach(([fr,v],i)=>{
+    const o=A.createOscillator(),g=A.createGain();o.type=i<2?'triangle':'sine';o.frequency.value=fr*(1+(Math.random()-.5)*.003);
+    g.gain.setValueAtTime(0,T+8.0);g.gain.linearRampToValueAtTime(v,T+8.02+i*.03);g.gain.setTargetAtTime(v*.6,T+8.3,.5);g.gain.setTargetAtTime(0,T+9.6,.35);
+    o.connect(g);out(g,.8,1);o.start(T+8.0);o.stop(T+11.5);});
+  return T;
+}
+
+/* ---------- Touch: squeeze, pull, stretch; on release it bounces back ---------- */
+const K=170,D=7.5;               // spring stiffness and damping: underdamped, so it bounces two or three times
+function toScene(e){const r=cv.getBoundingClientRect();
+  return [((e.clientX-r.left)/r.width-.5)*r.width/r.height,.5-(e.clientY-r.top)/r.height];}
+function rubber(x,y){const L=Math.hypot(x,y),k=1/(1+.35*L);return [x*k,y*k];}
+cv.addEventListener('pointerdown',e=>{
+  e.preventDefault();try{cv.setPointerCapture(e.pointerId);}catch(_){}
+  ensureAudio();
+  if(blobs.length>=4){const i=blobs.findIndex(b=>!b.active);if(i<0)return;blobs.splice(i,1);}
+  const [x,y]=toScene(e);
+  blobs.push({id:e.pointerId,gx:x,gy:y,ox:0,oy:0,vx:0,vy:0,active:true,tx:x,ty:y,last:performance.now()});
+});
+cv.addEventListener('pointermove',e=>{
+  const b=blobs.find(b=>b.active&&b.id===e.pointerId);if(!b)return;
+  const [x,y]=toScene(e);const now=performance.now(),dt=Math.max(.004,(now-b.last)/1000);
+  const [ox,oy]=rubber(x-b.gx,y-b.gy);
+  b.vx=b.vx*.5+.5*(ox-b.ox)/dt;b.vy=b.vy*.5+.5*(oy-b.oy)/dt;b.ox=ox;b.oy=oy;b.last=now;
+});
+const release=e=>{const b=blobs.find(b=>b.active&&b.id===e.pointerId);if(!b)return;b.active=false;if(!b.torn)thump(Math.hypot(b.ox,b.oy));};
+['pointerup','pointercancel','lostpointercapture'].forEach(n=>cv.addEventListener(n,release));
+function stepBlobs(dt){
+  const n=Math.ceil(dt/.004),h=dt/n;   // small substeps keep the spring stable on slow frames
+  for(let i=blobs.length-1;i>=0;i--){const b=blobs[i];if(b.active)continue;
+    for(let j=0;j<n;j++){b.vx+=(-K*b.ox-D*b.vx)*h;b.vy+=(-K*b.oy-D*b.vy)*h;b.ox+=b.vx*h;b.oy+=b.vy*h;}
+    if(Math.hypot(b.ox,b.oy)<4e-4&&Math.hypot(b.vx,b.vy)<4e-3)blobs.splice(i,1);}
+}
+
+/* ---------- The hum: one low drone that your fingers bend, squeeze and tear. Everything stays below ~1.1 kHz ---------- */
+let hum=null;
+const TEAR_AT=.42,REARM=.3;
+function ensureAudio(){
+  try{if(!ac)ac=buildAudio();if(ac.A.state==='suspended')ac.A.resume();if(!hum)makeHum();}catch(e){}
+}
+function shaperCurve(k){const n=1024,c=new Float32Array(n);for(let i=0;i<n;i++){const x=i/(n-1)*2-1;c[i]=Math.tanh(k*x)/Math.tanh(k);}return c;}
+function makeHum(){
+  const {A,master,verb,noiseBuf}=ac;
+  const bus=A.createGain();bus.gain.value=.5;
+  const lfo=A.createOscillator(),lfoG=A.createGain();lfo.frequency.value=5;lfoG.gain.value=0;lfo.connect(lfoG);lfo.start();
+  const bend=A.createConstantSource?A.createConstantSource():null; // pitch bend in cents, shared by all oscillators
+  if(bend){bend.offset.value=0;bend.start();}
+  [[73.42,'sawtooth',.5],[73.42*1.004,'sawtooth',.45],[36.71,'square',.35],[110.2,'sawtooth',.22]].forEach(([f,type,v])=>{
+    const o=A.createOscillator(),g=A.createGain();o.type=type;o.frequency.value=f;g.gain.value=v;
+    lfoG.connect(o.detune);if(bend)bend.connect(o.detune);o.connect(g);g.connect(bus);o.start();});
+  const clean=A.createGain(),dirty=A.createGain(),shaper=A.createWaveShaper();
+  shaper.curve=shaperCurve(9);shaper.oversample='2x';clean.gain.value=1;dirty.gain.value=0;
+  bus.connect(clean);bus.connect(shaper);shaper.connect(dirty);
+  const f=A.createBiquadFilter();f.type='lowpass';f.frequency.value=300;f.Q.value=3;
+  const guard=A.createBiquadFilter();guard.type='lowpass';guard.frequency.value=1100;guard.Q.value=.7;  // nothing high gets through
+  clean.connect(f);dirty.connect(f);f.connect(guard);
+  const g=A.createGain();g.gain.value=0;guard.connect(g);g.connect(master);
+  const wet=A.createGain();wet.gain.value=.3;g.connect(wet);wet.connect(verb);
+  // crackle while torn: gated low-mid noise
+  const n=A.createBufferSource();n.buffer=noiseBuf;n.loop=true;
+  const nb=A.createBiquadFilter();nb.type='bandpass';nb.frequency.value=520;nb.Q.value=1.3;
+  const nl=A.createBiquadFilter();nl.type='lowpass';nl.frequency.value=1100;
+  const ng=A.createGain();ng.gain.value=0;n.connect(nb);nb.connect(nl);nl.connect(ng);ng.connect(master);n.start();
+  hum={lfo,lfoG,bend,clean,dirty,f,g,ng,bendCents:0};
+}
+function rip(strength){   // the moment it tears: a dull ripping sound and a low crack
+  if(!ac)return;
+  const {A,master,verb,noiseBuf}=ac,t=A.currentTime;
+  const n=A.createBufferSource();n.buffer=noiseBuf;
+  const bp=A.createBiquadFilter();bp.type='bandpass';bp.Q.value=2.2;
+  bp.frequency.setValueAtTime(900,t);bp.frequency.exponentialRampToValueAtTime(140,t+.38);
+  const lp=A.createBiquadFilter();lp.type='lowpass';lp.frequency.value=1100;
+  const g=A.createGain();g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.42*strength,t+.006);g.gain.exponentialRampToValueAtTime(.001,t+.42);
+  n.connect(bp);bp.connect(lp);lp.connect(g);g.connect(master);const w=A.createGain();w.gain.value=.5;g.connect(w);w.connect(verb);
+  n.start(t,Math.random());n.stop(t+.45);
+  const o=A.createOscillator(),og=A.createGain();o.type='sine';
+  o.frequency.setValueAtTime(150,t);o.frequency.exponentialRampToValueAtTime(42,t+.25);
+  og.gain.setValueAtTime(0,t);og.gain.linearRampToValueAtTime(.35*strength,t+.005);og.gain.exponentialRampToValueAtTime(.001,t+.35);
+  o.connect(og);og.connect(master);o.start(t);o.stop(t+.4);
+  if(hum)hum.bendCents-=500;   // the hum drops when it tears, then recovers
+}
+function thump(L){
+  if(!ac||L<.02)return;
+  const {A,master,verb}=ac,t=A.currentTime;
+  const o=A.createOscillator(),g=A.createGain();o.type='sine';
+  o.frequency.setValueAtTime(150,t);o.frequency.exponentialRampToValueAtTime(60,t+.3);
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(Math.min(.25,L*.4),t+.008);g.gain.exponentialRampToValueAtTime(.0008,t+.45);
+  o.connect(g);g.connect(master);const w=A.createGain();w.gain.value=.3;g.connect(w);w.connect(verb);o.start(t);o.stop(t+.5);
+}
+function updateTension(dt){
+  // per finger: tension, tearing state; visual tear amount decays after release
+  for(const b of blobs){
+    const L=Math.hypot(b.ox,b.oy),S=Math.hypot(b.vx,b.vy);
+    const T=L+.06*Math.min(S,4);
+    if(b.active){
+      if(!b.torn&&T>TEAR_AT){b.torn=true;rip(Math.min(1,.6+(T-TEAR_AT)*2));}
+      if(b.torn&&T<REARM)b.torn=false;
+    }
+    const target=b.active&&b.torn?Math.min(1,.45+(T-REARM)*2.2):0;
+    b.tear=(b.tear||0)+(target-(b.tear||0))*Math.min(1,dt*(target>(b.tear||0)?25:4));
+  }
+}
+function soundHum(){
+  if(!ac||!hum)return;
+  const now=ac.A.currentTime;
+  let L=0,S=0,tear=0;
+  for(const b of blobs){L=Math.max(L,Math.hypot(b.ox,b.oy));S=Math.max(S,Math.hypot(b.vx,b.vy));tear=Math.max(tear,b.tear||0);}
+  // two fingers: squeezing pulls the hum down, spreading pushes it up
+  let pinch=0;const act=blobs.filter(b=>b.active);
+  if(act.length>=2){const[a,c]=act;const d0=Math.hypot(a.gx-c.gx,a.gy-c.gy),d1=Math.hypot(a.gx+a.ox-c.gx-c.ox,a.gy+a.oy-c.gy-c.oy);
+    if(d0>.02)pinch=Math.log2(Math.max(.25,Math.min(4,d1/d0)));}
+  hum.bendCents*=.9;
+  const cents=act.length>=2?pinch*1100:L*950;
+  const bendNow=cents+hum.bendCents+(Math.random()-.5)*tear*160;
+  if(hum.bend)hum.bend.offset.setTargetAtTime(bendNow,now,.012);
+  hum.lfoG.gain.setTargetAtTime(Math.min(S,3)*35+tear*110,now,.03);
+  hum.lfo.frequency.setTargetAtTime(4.5+Math.min(S,3)*2.5+tear*6,now,.05);
+  const dist=Math.min(1,L*.9+Math.abs(pinch)*.5+tear);
+  hum.dirty.gain.setTargetAtTime(dist*.8,now,.02);hum.clean.gain.setTargetAtTime(1-dist*.55,now,.02);
+  hum.f.frequency.setTargetAtTime(Math.min(1050,260+620*Math.min(L+Math.abs(pinch)*.5,1)+150*Math.min(S,2)+200*tear),now,.02);
+  const base=mode==='run'?.035:.06;   // quiet bed; the intro has its own drone
+  hum.g.gain.setTargetAtTime(Math.min(.3,base+L*.32+Math.abs(pinch)*.15+S*.03+tear*.06),now,.025);
+  hum.ng.gain.setTargetAtTime(tear>.05&&Math.random()<tear*.7?tear*.22*Math.random():0,now,.004);
+}
+window.__touchAudio=()=>ac;   // used by the automated test only
+
+/* ---------- Playback ---------- */
+const query=new URLSearchParams(location.search);
+const intro=document.getElementById('intro'),endEl=document.getElementById('end'),stats=document.getElementById('stats');
+let t0=0,useAudio=false,frames=0,pixels=0,mode='idle',lastNow=0,dtAvg=16,slowStreak=0,downgraded=false;
+const BLEND=.42; // share of the previous frame kept in each new one
+function clock(){return useAudio&&ac?ac.A.currentTime-t0:(performance.now()/1000)-t0;}
+
+function tick(now){
+  const dt=Math.min(now-lastNow,100);lastNow=now;
+  stepBlobs(dt/1000);updateTension(dt/1000);soundHum();
+  if(mode==='idle'){
+    render(.15+.05*Math.sin(now/600),BLEND,dt);
+  }else if(mode==='run'){
+    dtAvg=dtAvg*.9+dt*.1;
+    // last resort only: one single step down if the device is far too slow
+    if(!downgraded&&frames>40){slowStreak=dtAvg>40?slowStreak+1:0;
+      if(slowStreak>20){downgraded=true;scale=Math.max(.25,scale*.75);applySize();}}
+    const t=Math.max(0,clock());
+    render(Math.min(t,DUR),frames===0?0:BLEND,Math.min(dt,50));
+    frames++;pixels+=W*H;
+    if(t>=DUR){mode='end';finish();}
+  }else{
+    outOnly(now/1000);   // the final picture stays, and you can still knead it
+  }
+  requestAnimationFrame(tick);
+}
+function start(){
+  intro.hidden=true;endEl.hidden=true;endEl.classList.remove('on');
+  frames=0;pixels=0;slowStreak=0;
+  try{ ensureAudio(); t0=schedule(ac); useAudio=true; }
+  catch(e){ useAudio=false; t0=performance.now()/1000; }
+  mode='run';
+}
+function finish(){
+  const kb=(new Blob([document.documentElement.outerHTML]).size/1024).toFixed(0);
+  stats.innerHTML=`<span><b>${frames}</b> Bilder live berechnet</span><span><b>${(pixels/1e6).toFixed(0)}</b> Mio. Pixel</span><span><b>0</b> Videos · <b>0</b> Grafiken · <b>0</b> Audiodateien</span><span><b>${kb}</b> KB Code</span>`;
+  endEl.hidden=false;requestAnimationFrame(()=>endEl.classList.add('on'));
+}
+document.getElementById('start').addEventListener('click',start);
+document.getElementById('again').addEventListener('click',start);
+addEventListener('resize',()=>{if(mode==='idle')applySize();});
+
+if(query.has('t')){ // frozen frame for previews; ?pull=x,y,dx,dy simulates a finger
+  intro.hidden=true;scale=1;applySize();const ft=parseFloat(query.get('t'))||0;
+  if(query.has('pull')){const [x,y,dx,dy]=query.get('pull').split(',').map(Number);blobs.push({gx:x,gy:y,ox:dx,oy:dy,vx:0,vy:0,active:true,tear:parseFloat(query.get('tear')||0)});}
+  for(let i=14;i>=0;i--)render(Math.max(0,ft-i/30),i===14?0:BLEND,33.3);window.__rendered=true;
+}else{benchmark();window.__scale=scale;lastNow=performance.now();requestAnimationFrame(tick);}
+})();
+</script>
+
+</body>
+</html>
